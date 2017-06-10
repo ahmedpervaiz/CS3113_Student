@@ -2,10 +2,11 @@
 
 Player::Player(unsigned int spriteID)
 {
-	sprite = new SpriteSheet(spriteID, 150, 638, 73, 52, 585, 718, sizeMod);
+	entityType = EntityType::ENTITY_PLAYER;
+	sprite = new SpriteSheet(spriteID, 369, 5, 65, 91, 512, 512, sizeMod);
 
-	size.x = 73 * sizeMod / 640 * 7;
-	size.y = 52 * sizeMod / 360 * 4;
+	size.x = 65 * sizeMod / 640 * 7;
+	size.y = 91 * sizeMod / 360 * 4;
 }
 
 Player::~Player()

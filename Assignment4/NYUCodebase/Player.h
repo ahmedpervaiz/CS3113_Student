@@ -9,5 +9,6 @@ public:
 	void Draw(ShaderProgram *program);
 
 	float sizeMod = 0.22f;
-	float playerSpeed = 1.5f;
+	float playerSpeed = 0.33f;
+	float playerJump = 2.3f;
 };

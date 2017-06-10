@@ -13,6 +13,7 @@
 #endif
 
 #include <iostream>
+#include <vector>
 #include "ShaderProgram.h"
 #include "SpriteSheet.h"
 #include "Matrix.h"
@@ -26,8 +27,12 @@ public:
 	~Entity();
 
 	void Update(float elapsed);
+	void ApplyY(float elapsed);
+	void ApplyX(float elapsed);
+
 	void Draw(ShaderProgram * program);
-	bool isCollidingWith(Entity *other);
+	bool isCollidingWith(const Entity& other);
+	void checkBox(float u, float v, float width, float height);
 
 	SpriteSheet *sprite;
 	
@@ -36,8 +41,18 @@ public:
 	Vector3 acceleration;
 	Vector3 size;
 
+	float friction_x = 0.9f;
+	float friction_y = 0.6f;
+	float gravity_x = 0.0f;
+	float gravity_y = -0.6f;
+
 	float rotation;
 
 	bool isStatic;
 	EntityType entityType;
+
+	bool collidedTop;
+	bool collidedBottom;
+	bool collidedLeft;
+	bool collidedRight;
 };

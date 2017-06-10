@@ -74,6 +74,10 @@ void DrawText(ShaderProgram *program, int fontTexture, std::string text, float x
 	glDisableVertexAttribArray(program->texCoordAttribute);
 }
 
+void buildLevel() {
+	memcpy(levelData, level1Data, LEVEL_WIDTH * LEVEL_HEIGHT);
+}
+
 void Setup() {
 
 	SDL_Init(SDL_INIT_VIDEO);
@@ -92,9 +96,10 @@ void Setup() {
 
 	program = new ShaderProgram(RESOURCE_FOLDER"vertex_textured.glsl", RESOURCE_FOLDER"fragment_textured.glsl");
 
-	blockTexture = LoadTexture(RESOURCE_FOLDER"whiteblock.png");
-	invadersTexture = LoadTexture(RESOURCE_FOLDER"invaders.gif");
 	fontTexture = LoadTexture(RESOURCE_FOLDER"font1.png");
+	blockTexture = LoadTexture(RESOURCE_FOLDER"whiteblock.png");
+	invadersTexture = LoadTexture(RESOURCE_FOLDER"p1_spritesheet.png");
+	snailTexture = LoadTexture(RESOURCE_FOLDER"enemies_spritesheet.png");
 
 	// Set projection matrix
 	projectionMatrix = new Matrix();
@@ -109,6 +114,20 @@ void Setup() {
 	done = false;
 
 	gameState = 0;
+
+	player = new Player(invadersTexture);
+	player->position.x = 0.3f;
+	player->position.y = -0.8f;
+	entities.push_back(player);
+
+	enemy = new Invader(snailTexture);
+	enemy->position.x = 3.8f;
+	enemy->position.y = -0.8f;
+	entities.push_back(enemy);
+
+	gridX = new int(); gridY = new int();
+	worldX = new float(); worldY = new float();
+	buildLevel();
 }
 
 void ProcessEvents() {
@@ -119,162 +138,147 @@ void ProcessEvents() {
 	}
 }
 
-float lerp(float v1, float v2, float t) {
-	return v1 + t*(v2-v1);
+void worldToTileCoordinates(float worldX, float worldY, int *gridX, int *gridY) {
+	*gridX = (int)(worldX / TILE_SIZE);
+	*gridY = (int)(-worldY / TILE_SIZE);
 }
 
-void generateScene() {
-	for (int i = 0; i < 7; i++) {
-		for (int j = 0; j < 4; j++) {
-			Invader* invader = new Invader(invadersTexture, j, -3 + i * 2, 2 + j);
-			invaders.push_back(invader);
-		}
-	}
-	player = new Player(invadersTexture);
-	player->position.y = -1.7f;
+void tileCoordinatesToWorld(float *worldX, float *worldY, int gridX, int gridY) {
+	*worldX = gridX * TILE_SIZE;
+	*worldY = -gridY * TILE_SIZE;
 }
 
-void Update() {
-	ticks = (float)SDL_GetTicks() / 1000.0f;
-	elapsed = ticks - lastFrameTicks;
-	lastFrameTicks = ticks;
+void Update(float elapsed) {
 
 	// Render Inputs
 	const Uint8 *keys = SDL_GetKeyboardState(NULL);
 
-	if (gameState == 0 && keys[SDL_SCANCODE_SPACE]) {
-		gameState = 1;
-
-		generateScene();
-	}
-	else if (gameState == 1) {
-		player->velocity.x = 0;
+	if (gameState == 0) {
+		player->acceleration.x = 0;
 		if (keys[SDL_SCANCODE_LEFT]) {
-			player->velocity.x = -player->playerSpeed;
+			player->acceleration.x -= player->playerSpeed;
 		}
 		if (keys[SDL_SCANCODE_RIGHT]) {
-			player->velocity.x = player->playerSpeed;
+			player->acceleration.x += player->playerSpeed;
 		}
-		if (keys[SDL_SCANCODE_SPACE] && !spacekeyState && pbullets.size() < 10) {
-			PBullet* pbullet = new PBullet(invadersTexture);
-			pbullet->position = player->position;
-			pbullet->velocity.y = 1.8f;
-			pbullets.push_back(pbullet);
-		}
-		player->Update(elapsed);
-		if (player->position.x > 3.55f) {
-			player->position.x = 3.55f;
-		}
-		if (player->position.x < -3.55f) {
-			player->position.x = -3.55f;
+		if (keys[SDL_SCANCODE_SPACE] && player->collidedBottom) {
+			player->velocity.y = player->playerJump;
 		}
 
-		invadeTicks += elapsed;
+		if (enemy->collidedLeft) {
+			enemy->direction = 1;
+		}
+		if (enemy->collidedRight) {
+			enemy->direction = -1;
+		}
+		if (enemy->collidedBottom) {
+			enemy->acceleration.x = enemy->playerSpeed * enemy->direction;
+		}
 
-		int minx = 20, maxx = -20;
-		for (int i = 0; i < invaders.size(); i++) {
-			invaders.at(i)->Update(elapsed);
-			if (invaders.at(i)->xspace < minx) {
-				minx = invaders.at(i)->xspace;
+		for (Entity* entity : entities) {
+			entity->Update(elapsed);
+			entity->ApplyY(elapsed);
+			//Check collision
+			worldToTileCoordinates(entity->position.x, entity->position.y - entity->size.y, gridX, gridY); // check bottom
+			if (*gridX >= 0 && *gridX < LEVEL_WIDTH && *gridY >= 0 && *gridY < LEVEL_HEIGHT && levelData[*gridY][*gridX] != 0) {
+				entity->collidedBottom = true;
+				entity->position.y = -*gridY * TILE_SIZE + entity->size.y / 2 + 0.08f;
+				entity->velocity.y = 0;
 			}
-			if (invaders.at(i)->xspace > maxx) {
-				maxx = invaders.at(i)->xspace;
+			worldToTileCoordinates(entity->position.x, entity->position.y + entity->size.y, gridX, gridY); // check top
+			if (*gridX >= 0 && *gridX < LEVEL_WIDTH && *gridY >= 0 && *gridY < LEVEL_HEIGHT && levelData[*gridY][*gridX] != 0) {
+				entity->collidedTop = true;
+				entity->position.y = -(*gridY + 1) * TILE_SIZE - entity->size.y / 2 - 0.12f;
+				entity->velocity.y = 0;
 			}
-		}
 
-		if (invadeTicks > 1) {
-			if (invadeDirection == 0) { //GO LEFT 
-				if (minx > -12) {
-					for (int i = 0; i < invaders.size(); i++) {
-						invaders.at(i)->xspace--;
-					}
-				}
-				else {
-					for (int i = 0; i < invaders.size(); i++) {
-						invaders.at(i)->yspace--;
-					}
-					invadeDirection = 1; //GO RIGHT
-				}
+			entity->ApplyX(elapsed);
+			worldToTileCoordinates(entity->position.x - entity->size.x, entity->position.y, gridX, gridY); // check left
+			if (*gridX >= 0 && *gridX < LEVEL_WIDTH && *gridY >= 0 && *gridY < LEVEL_HEIGHT && levelData[*gridY][*gridX] != 0) {
+				entity->collidedLeft = true;
+				entity->position.x = (*gridX + 1) * TILE_SIZE + entity->size.x / 2 + 0.16f;
+				entity->velocity.x = 0;
 			}
-			else if (invadeDirection == 1) { //GO DOWN
-				if (maxx < 12) {
-					for (int i = 0; i < invaders.size(); i++) {
-						invaders.at(i)->xspace++;
-					}
-				}
-				else {
-					for (int i = 0; i < invaders.size(); i++) {
-						invaders.at(i)->yspace--;
-					}
-					invadeDirection = 0;
-				}
-			}
-			invadeTicks = 0;
-		}
-
-		for (int i = 0; i < pbullets.size(); i++) {
-			pbullets.at(i)->Update(elapsed);
-
-			if (pbullets.at(i)->position.y > 2.0f) {
-				delete pbullets.at(i);
-				pbullets.erase(pbullets.begin() + i);
-				i--;
-			}
-			else {
-				for (int j = 0; j < invaders.size(); j++) {
-					if (pbullets.at(i)->isCollidingWith(invaders.at(j))) {
-						delete pbullets.at(i);
-						pbullets.erase(pbullets.begin() + i);
-						i--;
-						delete invaders.at(j);
-						invaders.erase(invaders.begin() + j);
-						j--;
-						playScore += 100;
-						break;
-					}
-				}
-
-				if (invaders.size() == 0) {
-					gameState = 0;
-					if (playScore > playHiScore)
-						playHiScore = playScore;
-				}
+			worldToTileCoordinates(entity->position.x + entity->size.x, entity->position.y, gridX, gridY); // check right
+			if (*gridX >= 0 && *gridX < LEVEL_WIDTH && *gridY >= 0 && *gridY < LEVEL_HEIGHT && levelData[*gridY][*gridX] != 0) {
+				entity->collidedRight = true;
+				entity->position.x = *gridX * TILE_SIZE - entity->size.x / 2 - 0.16f;
+				entity->velocity.x = 0;
 			}
 		}
 
-		for (int i = 0; i < invaders.size(); i++) {
-			if (player->isCollidingWith(invaders.at(i))) {
-				gameState = 0;
-				if (playScore > playHiScore)
-					playHiScore = playScore;
-			}
+		if (player->isCollidingWith(*enemy)) {
+			player->velocity.y = (player->position.y - enemy->position.y) * 12;
+			player->velocity.x = (player->position.x - enemy->position.x) * 8;
 		}
 	}
-
-	spacekeyState = keys[SDL_SCANCODE_SPACE];
 }
 
 void Render() {
 	glClear(GL_COLOR_BUFFER_BIT);
 
 	if (gameState == 0) {
-		DrawText(program, fontTexture, "Invaders", -1.3f, 0.4f, 1, -0.6f);
-		DrawText(program, fontTexture, "Press SPACE to Start", -1.5f, -0.6f, 0.4f, -0.6f);
+		viewMatrix->identity();
+		viewMatrix->Translate(-player->position.x, -player->position.y, -player->position.z);
 
-		DrawText(program, fontTexture, "High Score: " + std::to_string(playHiScore), -3.4f, -1.7f, 0.4f, -0.6f);
-	}
-	else if (gameState == 1) {
+		program->setModelMatrix(Matrix());
 		program->setProjectionMatrix(*projectionMatrix);
 		program->setViewMatrix(*viewMatrix);
 
-		for (int i = 0; i < invaders.size(); i++) {
-			invaders.at(i)->Draw(program, elapsed);
+		std::vector<float> vertexData;
+		std::vector<float> texCoordData;
+
+		int blankTiles = 0;
+
+		for (int y = 0; y < LEVEL_HEIGHT; y++) {
+			for (int x = 0; x < LEVEL_WIDTH; x++) {
+				if (levelData[y][x] == 0) {
+					blankTiles++;
+				}
+				else {
+					float u = (float)(((int)levelData[y][x]) % SPRITE_COUNT_X) / (float)SPRITE_COUNT_X;
+					float v = (float)(((int)levelData[y][x]) / SPRITE_COUNT_X) / (float)SPRITE_COUNT_Y;
+
+					float spriteWidth = 1.0f / (float)SPRITE_COUNT_X;
+					float spriteHeight = 1.0f / (float)SPRITE_COUNT_Y;
+
+					vertexData.insert(vertexData.end(), {
+						TILE_SIZE * x, -TILE_SIZE * y,
+						TILE_SIZE * x, -TILE_SIZE * (y + 1),
+						TILE_SIZE * (x + 1), -TILE_SIZE * (y + 1),
+
+						TILE_SIZE * x, -TILE_SIZE * y,
+						TILE_SIZE * (x + 1), -TILE_SIZE * (y + 1),
+						TILE_SIZE * (x + 1), -TILE_SIZE * y
+					});
+
+					texCoordData.insert(texCoordData.end(), {
+						u, v,
+						u, v + spriteHeight,
+						u + spriteWidth, v + spriteHeight,
+
+						u, v,
+						u + spriteWidth, v + spriteHeight,
+						u + spriteWidth, v
+					});
+				}
+			}
 		}
-		player->Draw(program);
-		for (int i = 0; i < pbullets.size(); i++) {
-			pbullets.at(i)->Draw(program);
+
+		glEnableVertexAttribArray(program->positionAttribute);
+		glEnableVertexAttribArray(program->texCoordAttribute);
+		glVertexAttribPointer(program->positionAttribute, 2, GL_FLOAT, false, 0, &vertexData[0]);
+		glVertexAttribPointer(program->texCoordAttribute, 2, GL_FLOAT, false, 0, &texCoordData[0]);
+
+		glBindTexture(GL_TEXTURE_2D, blockTexture);
+		glDrawArrays(GL_TRIANGLES, 0, 6 * (LEVEL_HEIGHT * LEVEL_WIDTH - blankTiles));
+
+		glDisableVertexAttribArray(program->positionAttribute);
+		glDisableVertexAttribArray(program->texCoordAttribute);
+
+		for (Entity* entity : entities) {
+			entity->Draw(program);
 		}
-		DrawText(program, fontTexture, "Score: " + std::to_string(playScore), -3.4f, -1.7f, 0.4f, -0.6f);
 	}
 
 	SDL_GL_SwapWindow(displayWindow);
@@ -289,8 +293,21 @@ int main(int argc, char *argv[])
 	Setup();
 
 	while (!done) {
+		ticks = (float)SDL_GetTicks() / 1000.0f;
+		elapsed = ticks - lastFrameTicks;
+		lastFrameTicks = ticks;
+
+		float fixedElapsed = elapsed;
+		if (fixedElapsed > FIXED_TIMESTEP * MAX_TIMESTEPS) {
+			fixedElapsed = FIXED_TIMESTEP * MAX_TIMESTEPS;
+		}
+		while (fixedElapsed >= FIXED_TIMESTEP) {
+			fixedElapsed -= FIXED_TIMESTEP;
+			Update(FIXED_TIMESTEP);
+		}
+
 		ProcessEvents();
-		Update();
+		Update(FIXED_TIMESTEP);
 		Render();
 	}
 
